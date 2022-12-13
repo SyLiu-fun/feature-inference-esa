@@ -37,18 +37,32 @@ class ParamsParser:
                 dic[param] = self.parameters[param]
         return dic
 
+
 # divide the origin dataset into training set, test set and prediction set
-def partition(parser:ParamsParser):
-    training_rate = parser.getparam('training_rate')
+def partition(parser: ParamsParser):
     test_rate = parser.getparam('test_rate')
     prediction_rate = parser.getparam('prediction_rate')
     file_path = parser.getparam('original')
+    data_path = parser.getparam('data_path')
 
-    original = np.loadtxt(file_path, dtype=np.float)
-    print(original)
+    original = np.loadtxt(file_path, dtype=float, delimiter=',')
+    total_samples_num = len(original)
+    pred_samples_num = int(total_samples_num * prediction_rate)  # 6097
+    test_samples_num = int((1 - prediction_rate) * test_rate * total_samples_num)  # 4878
+    train_samples_num = total_samples_num - test_samples_num - pred_samples_num  # 19513
+
+    train_samples = original[:train_samples_num, :]
+    test_samples = original[train_samples_num:train_samples_num + test_samples_num, :]
+    pred_samples = original[train_samples_num + test_samples_num:, :]
+
+    np.savetxt(data_path + os.sep + 'train_set.csv', train_samples, fmt='%.3f', delimiter=',')
+    np.savetxt(data_path + os.sep + 'test_set.csv', test_samples, fmt='%.3f', delimiter=',')
+    np.savetxt(data_path + os.sep + 'pred_set.csv', pred_samples, fmt='%.3f', delimiter=',')
+    return train_samples, test_samples, pred_samples
+
+
 
 
 if __name__ == '__main__':
     pp = ParamsParser()
     partition(pp)
-
