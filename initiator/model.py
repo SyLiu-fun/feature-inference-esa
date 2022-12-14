@@ -2,12 +2,12 @@ from torch import nn
 
 
 # create a LR model
-class LogisticRegressionModel(nn.model):
-    def __init__(self):
+class LogisticRegressionModel(nn.Module):
+    def __init__(self, feature_num, class_num):
         super(LogisticRegressionModel, self).__init__()
         self.dense = nn.Sequential(
-            nn.Linear(10, 2, False),
-            nn.Softmax()
+            nn.Linear(feature_num, class_num, False),
+            nn.Sigmoid()
         )
 
     def forward(self, x):
