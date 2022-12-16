@@ -6,7 +6,7 @@ import torch.optim
 import torch.utils.data as data
 from torch.utils.data import Dataset
 
-from model import LogisticRegressionModel
+from model1 import LogisticRegressionModel
 
 
 class ParamsParser:
@@ -42,8 +42,9 @@ class ParamsParser:
                 dic[param] = self.parameters[param]
         return dic
 
+
 class MyDataset(Dataset):
-    def __init__(self, parser:ParamsParser):
+    def __init__(self, parser: ParamsParser):
         test_rate = parser.getparam('test_rate')
         prediction_rate = parser.getparam('prediction_rate')
         file_path = parser.getparam('original')
@@ -53,7 +54,7 @@ class MyDataset(Dataset):
         self.total_samples_num = len(original)
         self.pred_samples_num = int(self.total_samples_num * prediction_rate)  # 6097
         self.test_samples_num = int((1 - prediction_rate) * test_rate * self.total_samples_num)  # 4878
-        self.train_samples_num = self.total_samples_num - self.test_samples_num -self. pred_samples_num  # 19513
+        self.train_samples_num = self.total_samples_num - self.test_samples_num - self.pred_samples_num  # 19513
 
         # save to file
         # In order to maintain the consistency of ids in prediction sets of both parties,
@@ -77,7 +78,7 @@ class MyDataset(Dataset):
         return self.samples[idx], self.labels[idx]
 
 
-def train(model, epochs, optimizer, train_loader):
+def train(model, epoch, optimizer, train_loader):
     for data, label in train_loader:
         optimizer.zero_grad()
         y_pred = model(data)
@@ -86,15 +87,36 @@ def train(model, epochs, optimizer, train_loader):
         optimizer.step()
 
 
+def test(model, epoch, test_loader, test_num):
+    loss = 0
+    correct = 0
+    with torch.no_grad():
+        for data, label in test_loader:
+            y_pred = model(data)
+            loss += criteria(y_pred, label.long())
+            res = y_pred.argmax(dim=1, keepdim=True)
+            correct += res.eq(label.view_as(res)).sum().item()
+    print('step{}, accuracy: {}%'.format(epoch, correct / test_num))
+
+
 if __name__ == '__main__':
     pp = ParamsParser()
     dataset = MyDataset(pp)
     LR_model = LogisticRegressionModel(dataset.feature_num, dataset.class_num)
     optimizer = torch.optim.Adam(LR_model.parameters())
-    criteria = torch.nn.BCELoss()
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
-    # TODO: do not use random split method. how to split Dataset sequentially?
-    train_set, test, pred = torch.utils.data.random_split(dataset, [19513, 4878, 6097])
-    train_loader = data.DataLoader(train_set, batch_size=64, shuffle=False)
+    criteria = torch.nn.CrossEntropyLoss()
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
 
-    train(LR_model, pp.getparam('epochs'), optimizer, train_loader)
+    train_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num))
+    test_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num, dataset.train_samples_num + dataset.test_samples_num))
+    pred_set = torch.utils.data.Subset(dataset, range(dataset.test_samples_num + dataset.train_samples_num, dataset.__len__()))
+    # for i in range(dataset.train_samples_num):
+    #     x, y = train_set.__getitem__(i)
+    #     print(x, y)
+    train_loader = data.DataLoader(train_set, batch_size=64, shuffle=False)
+    test_loader = data.DataLoader(test_set, batch_size=64, shuffle=False)
+
+    for i in range(1, pp.getparam('epochs') + 1):
+        train(LR_model, i, optimizer, train_loader)
+        test(LR_model, i, test_loader, dataset.test_samples_num)
+        scheduler.step()

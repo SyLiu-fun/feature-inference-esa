@@ -7,7 +7,6 @@ class LogisticRegressionModel(nn.Module):
         super(LogisticRegressionModel, self).__init__()
         self.dense = nn.Sequential(
             nn.Linear(feature_num, class_num, False),
-            nn.Sigmoid()
         )
 
     def forward(self, x):
