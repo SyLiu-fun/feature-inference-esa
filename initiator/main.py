@@ -1,5 +1,8 @@
 import configparser
 import os
+import socket
+import sys
+import json
 
 import numpy as np
 import torch.optim
@@ -19,6 +22,7 @@ class ParamsParser:
 
         train_param = config['TRAIN']
         dataset_param = config['DATASET']
+        socket_param = config['SOCKET']
         self.parameters['data_path'] = os.path.dirname(os.path.realpath(__file__)) + os.sep + 'dataset'
         self.parameters['original'] = self.parameters['data_path'] + os.sep + train_param['DataFile']
         self.parameters['log_path'] = os.path.dirname(os.path.realpath(__file__)) + os.sep + 'log'
@@ -28,6 +32,8 @@ class ParamsParser:
         self.parameters['training_rate'] = dataset_param.getfloat('TrainPortion')
         self.parameters['test_rate'] = dataset_param.getfloat('TestPortion')
         self.parameters['prediction_rate'] = dataset_param.getfloat('PredictPortion')
+        self.parameters['host'] = socket_param['host']
+        self.parameters['port'] = socket_param.getint('port')
 
     def getparam(self, param):
         if param in self.parameters.keys():
@@ -99,24 +105,57 @@ def test(model, epoch, test_loader, test_num):
     print('step{}, accuracy: {}%'.format(epoch, correct / test_num))
 
 
+client_type = 'initiator'
+
+
+def send_data(client, cmd, **kv):
+    global client_type
+    jd = {}
+    jd['COMMAND'] = cmd
+    jd['client_type'] = client_type
+    jd['data'] = kv
+
+    jsonstr = json.dumps(jd)
+    print('send: ' + jsonstr)
+    client.sendall(jsonstr.encode('utf-8'))
+
+
+
 if __name__ == '__main__':
     pp = ParamsParser()
-    dataset = MyDataset(pp)
-    LR_model = LogisticRegressionModel(dataset.feature_num, dataset.class_num)
-    optimizer = torch.optim.Adam(LR_model.parameters())
-    criteria = torch.nn.CrossEntropyLoss()
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
+    # dataset = MyDataset(pp)
+    # LR_model = LogisticRegressionModel(dataset.feature_num, dataset.class_num)
+    # optimizer = torch.optim.Adam(LR_model.parameters())
+    # criteria = torch.nn.CrossEntropyLoss()
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
+    #
+    # train_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num))
+    # test_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num, dataset.train_samples_num + dataset.test_samples_num))
+    # pred_set = torch.utils.data.Subset(dataset, range(dataset.test_samples_num + dataset.train_samples_num, dataset.__len__()))
+    # # for i in range(dataset.train_samples_num):
+    # #     x, y = train_set.__getitem__(i)
+    # #     print(x, y)
+    # train_loader = data.DataLoader(train_set, batch_size=64, shuffle=False)
+    # test_loader = data.DataLoader(test_set, batch_size=64, shuffle=False)
+    #
+    # for i in range(1, pp.getparam('epochs') + 1):
+    #     train(LR_model, i, optimizer, train_loader)
+    #     test(LR_model, i, test_loader, dataset.test_samples_num)
+    #     scheduler.step()
+    #
+    # initiator_param = None
+    # for name, param in LR_model.named_parameters():
+    #     if param.requires_grad:
+    #         initiator_param = param.data
 
-    train_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num))
-    test_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num, dataset.train_samples_num + dataset.test_samples_num))
-    pred_set = torch.utils.data.Subset(dataset, range(dataset.test_samples_num + dataset.train_samples_num, dataset.__len__()))
-    # for i in range(dataset.train_samples_num):
-    #     x, y = train_set.__getitem__(i)
-    #     print(x, y)
-    train_loader = data.DataLoader(train_set, batch_size=64, shuffle=False)
-    test_loader = data.DataLoader(test_set, batch_size=64, shuffle=False)
+    # send params to coordinator
+    client = socket.socket()
+    client.connect(('127.0.0.1', 12345))
+    print(client.recv(1024).decode(encoding='utf-8'))
+    send_data(client, 'CONNECT')
 
-    for i in range(1, pp.getparam('epochs') + 1):
-        train(LR_model, i, optimizer, train_loader)
-        test(LR_model, i, test_loader, dataset.test_samples_num)
-        scheduler.step()
+    while True:
+        print('send parameters to coordinator')
+        b = input('start')
+        a = [1, 2, 3, 4, 5]
+        send_data(client, 'SEND_DATA', data=a)
