@@ -3,6 +3,7 @@ import os
 import socket
 import sys
 import json
+import time
 
 import numpy as np
 import torch.optim
@@ -85,12 +86,18 @@ class MyDataset(Dataset):
 
 
 def train(model, epoch, optimizer, train_loader):
+    global client
+    recv_param = None
+    optimizer.zero_grad()
     for data, label in train_loader:
-        optimizer.zero_grad()
         y_pred = model(data)
-        loss = criteria(y_pred, label.long())
-        loss.backward()
-        optimizer.step()
+        # send data to coordinator
+        send_data(client, 'SEND_DATA', data=y_pred.tolist())
+    while recv_param is None:
+        time.sleep(0.1)
+        # loss = criteria(y_pred, label.long())
+        # loss.backward()
+        # optimizer.step()
 
 
 def test(model, epoch, test_loader, test_num):
@@ -105,9 +112,6 @@ def test(model, epoch, test_loader, test_num):
     print('step{}, accuracy: {}%'.format(epoch, correct / test_num))
 
 
-client_type = 'initiator'
-
-
 def send_data(client, cmd, **kv):
     global client_type
     jd = {}
@@ -116,46 +120,61 @@ def send_data(client, cmd, **kv):
     jd['data'] = kv
 
     jsonstr = json.dumps(jd)
-    print('send: ' + jsonstr)
+    # print('send: ' + jsonstr)
     client.sendall(jsonstr.encode('utf-8'))
 
 
-
 if __name__ == '__main__':
+    client_type = None
     pp = ParamsParser()
-    # dataset = MyDataset(pp)
-    # LR_model = LogisticRegressionModel(dataset.feature_num, dataset.class_num)
-    # optimizer = torch.optim.Adam(LR_model.parameters())
-    # criteria = torch.nn.CrossEntropyLoss()
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
-    #
-    # train_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num))
-    # test_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num, dataset.train_samples_num + dataset.test_samples_num))
-    # pred_set = torch.utils.data.Subset(dataset, range(dataset.test_samples_num + dataset.train_samples_num, dataset.__len__()))
-    # # for i in range(dataset.train_samples_num):
-    # #     x, y = train_set.__getitem__(i)
-    # #     print(x, y)
-    # train_loader = data.DataLoader(train_set, batch_size=64, shuffle=False)
-    # test_loader = data.DataLoader(test_set, batch_size=64, shuffle=False)
-    #
-    # for i in range(1, pp.getparam('epochs') + 1):
-    #     train(LR_model, i, optimizer, train_loader)
-    #     test(LR_model, i, test_loader, dataset.test_samples_num)
-    #     scheduler.step()
-    #
-    # initiator_param = None
-    # for name, param in LR_model.named_parameters():
-    #     if param.requires_grad:
-    #         initiator_param = param.data
+    dataset = MyDataset(pp)
+    LR_model = LogisticRegressionModel(dataset.feature_num, dataset.class_num)
+    optimizer = torch.optim.Adam(LR_model.parameters())
+    criteria = torch.nn.CrossEntropyLoss()
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
 
-    # send params to coordinator
+    train_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num))
+    test_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num,
+                                                      dataset.train_samples_num + dataset.test_samples_num))
+    pred_set = torch.utils.data.Subset(dataset,
+                                       range(dataset.test_samples_num + dataset.train_samples_num, dataset.__len__()))
+
+    train_loader = data.DataLoader(train_set, batch_size=64, shuffle=False)
+    test_loader = data.DataLoader(test_set, batch_size=64, shuffle=False)
+
     client = socket.socket()
-    client.connect(('127.0.0.1', 12345))
-    print(client.recv(1024).decode(encoding='utf-8'))
-    send_data(client, 'CONNECT')
+    base_name = "initiator"
 
-    while True:
-        print('send parameters to coordinator')
-        b = input('start')
-        a = [1, 2, 3, 4, 5]
-        send_data(client, 'SEND_DATA', data=a)
+    for i in range(1, pp.getparam('epochs') + 1):
+        # connect to coordinator
+        # build a list to receive the params returned by coordinator
+
+        client_type = base_name + "-it-" + str(i)
+        print("initiator is connecting to coordinator in iterator-{}".format(i))
+        client.connect(('127.0.0.1', 12345))
+        print(client.recv(1024).decode(encoding='utf-8'))
+        send_data(client, 'CONNECT')
+        train(LR_model, i, optimizer, train_loader)
+
+        # train(LR_model, i, optimizer, train_loader)
+        # # test(LR_model, i, test_loader, dataset.test_samples_num)
+        # scheduler.step()
+
+    initiator_param = None
+    for name, param in LR_model.named_parameters():
+        if param.requires_grad:
+            initiator_param = param.data
+
+    # # send params to coordinator
+    # client = socket.socket()
+    # client.connect(('127.0.0.1', 12345))
+    # print(client.recv(1024).decode(encoding='utf-8'))
+    # send_data(client, 'CONNECT')
+    #
+    #
+    #
+    # while True:
+    #     print('send parameters to coordinator')
+    #     b = input('start')
+    #     a = [1, 2, 3, 4, 5]
+    #     send_data(client, 'SEND_DATA', data=a)

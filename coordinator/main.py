@@ -40,22 +40,28 @@ def message_handle(client, info):
     """
     消息处理
     """
-    client.sendall("connect server successfully!".encode(encoding='utf-8'))
+    client.sendall("Connection established successfully!".encode(encoding='utf-8'))
     while True:
         try:
-            bytes = client.recv(1024)
+            bytes = client.recv(1024*1024)
             msg = bytes.decode(encoding='utf-8')
             jd = json.loads(msg)
             cmd = jd['COMMAND']
             client_type = jd['client_type']
             if 'CONNECT' == cmd:
                 g_conn_pool[client_type] = client
+                print("current connect num: {}".format(len(g_conn_pool)))
                 print('on client connect: ' + client_type, info)
             elif 'SEND_DATA' == cmd:
-                print('recv client msg: ' + client_type, jd['data'])
-                param_dict[client_type] = jd['data']
+                # print(jd['data'])
+                # print('recv client msg: ' + client_type, jd['data'])
+                param_list = param_dict.get(client_type, [])
+                param_list.append(jd['data']['data'])
+                param_dict[client_type] = param_list
+                # print(param_dict[client_type])
+            # data
+            print(param_dict.get(client_type, []))
         except Exception as e:
-            print(e)
             remove_client(client_type)
             break
 
