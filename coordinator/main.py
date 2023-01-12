@@ -3,6 +3,9 @@ from threading import Thread
 import time
 import json
 
+import numpy as np
+import torch
+
 ADDRESS = ('127.0.0.1', 12345)
 
 g_socket_server = None
@@ -10,6 +13,9 @@ g_socket_server = None
 g_conn_pool = {}
 
 param_dict = {}
+
+# length of data
+data_len = 0
 
 
 def init():
@@ -40,11 +46,13 @@ def message_handle(client, info):
     """
     消息处理
     """
+    global data_len
+    data = []
     client.sendall("Connection established successfully!".encode(encoding='utf-8'))
     while True:
         try:
-            bytes = client.recv(1024*1024)
-            msg = bytes.decode(encoding='utf-8')
+            part = client.recv(4096)
+            msg = part.decode(encoding='utf-8')
             jd = json.loads(msg)
             cmd = jd['COMMAND']
             client_type = jd['client_type']
@@ -53,14 +61,12 @@ def message_handle(client, info):
                 print("current connect num: {}".format(len(g_conn_pool)))
                 print('on client connect: ' + client_type, info)
             elif 'SEND_DATA' == cmd:
-                # print(jd['data'])
                 # print('recv client msg: ' + client_type, jd['data'])
-                param_list = param_dict.get(client_type, [])
-                param_list.append(jd['data']['data'])
-                param_dict[client_type] = param_list
-                # print(param_dict[client_type])
-            # data
-            print(param_dict.get(client_type, []))
+                data.append(jd['data']['data'])
+            elif 'END' == cmd:
+                data_len = len(data)
+                param_dict[client_type] = data
+                # print(param_dict.get(client_type))
         except Exception as e:
             remove_client(client_type)
             break
@@ -80,8 +86,11 @@ if __name__ == '__main__':
     thread = Thread(target=accept_client)
     thread.setDaemon(True)
     thread.start()
-    # 主线程逻辑
+    # main thread
     while True:
+        if len(g_conn_pool) == 1:
+            for key in param_dict.keys():
+                np.array(param_dict.get(key))
         time.sleep(0.1)
 
     

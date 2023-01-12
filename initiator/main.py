@@ -91,8 +91,10 @@ def train(model, epoch, optimizer, train_loader):
     optimizer.zero_grad()
     for data, label in train_loader:
         y_pred = model(data)
+        print(y_pred.tolist())
         # send data to coordinator
         send_data(client, 'SEND_DATA', data=y_pred.tolist())
+    send_data(client, 'END')
     while recv_param is None:
         time.sleep(0.1)
         # loss = criteria(y_pred, label.long())
@@ -147,13 +149,12 @@ if __name__ == '__main__':
 
     for i in range(1, pp.getparam('epochs') + 1):
         # connect to coordinator
-        # build a list to receive the params returned by coordinator
-
         client_type = base_name + "-it-" + str(i)
         print("initiator is connecting to coordinator in iterator-{}".format(i))
         client.connect(('127.0.0.1', 12345))
         print(client.recv(1024).decode(encoding='utf-8'))
         send_data(client, 'CONNECT')
+
         train(LR_model, i, optimizer, train_loader)
 
         # train(LR_model, i, optimizer, train_loader)
