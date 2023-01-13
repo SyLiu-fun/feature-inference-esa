@@ -14,6 +14,8 @@ g_conn_pool = {}
 
 param_dict = {}
 
+labels = []
+
 # length of data
 data_len = 0
 
@@ -46,7 +48,7 @@ def message_handle(client, info):
     """
     消息处理
     """
-    global data_len
+    global data_len, labels
     data = []
     client.sendall("Connection established successfully!".encode(encoding='utf-8'))
     while True:
@@ -67,7 +69,10 @@ def message_handle(client, info):
                 data_len = len(data)
                 param_dict[client_type] = data
                 # print(param_dict.get(client_type))
+            elif 'SEND_LABELS' == cmd:
+                labels.append(jd['label']['label'])
         except Exception as e:
+            print(e.with_traceback())
             remove_client(client_type)
             break
 
@@ -88,9 +93,25 @@ if __name__ == '__main__':
     thread.start()
     # main thread
     while True:
-        if len(g_conn_pool) == 1:
-            for key in param_dict.keys():
-                np.array(param_dict.get(key))
+        if len(param_dict) == 2:
+            param_list = []
+            loss_list = []
+            Softmax = torch.nn.Softmax(dim=1)
+            loss = torch.nn.NLLLoss()
+            for i in range(data_len):
+                for key in param_dict.keys():
+                    if key.startswith('initiator'):
+                        param_list.append(torch.tensor(param_dict.get(key)[i]))
+                        # print(torch.tensor(param_dict.get(key)[i]))
+                for key in param_dict.keys():
+                    if key.startswith('responder'):
+                        param_list[i] += torch.tensor(param_dict.get(key)[i])
+                        # print(Softmax(param_list[i]))
+                        param_list[i] = Softmax(param_list[i])
+                        loss_list.append(loss(param_list[i], torch.tensor(labels[i]).long()))
+            print(loss_list[:])
+            # TODO: remove clients after loss calculating, init global parameters
+            pass
         time.sleep(0.1)
 
     

@@ -75,6 +75,10 @@ class MyDataset(Dataset):
         np.savetxt(data_path + os.sep + 'pred_set.csv', pred_file, fmt='%.3f', delimiter=',')
 
         self.samples, self.labels = original[:, :-1], original[:, -1]
+        self.feature_min, _ = self.samples.min(dim=0)
+        self.feature_max, _ = self.samples.max(dim=0)
+
+        self.samples = (self.samples - self.feature_min) / (self.feature_max - self.feature_min)
         self.feature_num = len(self.samples[0])
         self.class_num = len(np.unique(original[:, -1]))
 
@@ -91,9 +95,9 @@ def train(model, epoch, optimizer, train_loader):
     optimizer.zero_grad()
     for data, label in train_loader:
         y_pred = model(data)
-        print(y_pred.tolist())
         # send data to coordinator
         send_data(client, 'SEND_DATA', data=y_pred.tolist())
+        time.sleep(0.01)
     send_data(client, 'END')
     while recv_param is None:
         time.sleep(0.1)
