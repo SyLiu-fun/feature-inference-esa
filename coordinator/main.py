@@ -94,24 +94,20 @@ if __name__ == '__main__':
     # main thread
     while True:
         if len(param_dict) == 2:
-            param_list = []
+            param_list = [0] * data_len
             loss_list = []
             Softmax = torch.nn.Softmax(dim=1)
             loss = torch.nn.NLLLoss()
             for i in range(data_len):
                 for key in param_dict.keys():
-                    if key.startswith('initiator'):
-                        param_list.append(torch.tensor(param_dict.get(key)[i]))
-                        # print(torch.tensor(param_dict.get(key)[i]))
-                for key in param_dict.keys():
-                    if key.startswith('responder'):
-                        param_list[i] += torch.tensor(param_dict.get(key)[i])
-                        # print(Softmax(param_list[i]))
-                        param_list[i] = Softmax(param_list[i])
-                        loss_list.append(loss(param_list[i], torch.tensor(labels[i]).long()))
-            print(loss_list[:])
+                    param_list[i] += torch.tensor(param_dict.get(key)[i])
+                # print(Softmax(param_list[i]))
+                param_list[i] = Softmax(param_list[i])
+                loss_list.append(loss(param_list[i], torch.tensor(labels[i]).long()))
+            # print(loss_list[:])
             # TODO: remove clients after loss calculating, init global parameters
-            pass
+            for cli in g_conn_pool:
+                print(g_conn_pool.get(cli))
         time.sleep(0.1)
 
     
