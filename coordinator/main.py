@@ -19,6 +19,9 @@ labels = []
 # length of data
 data_len = 0
 
+initiator_batch_idx = 0
+responder_batch_idx = 0
+
 
 def init():
     """
@@ -48,7 +51,7 @@ def message_handle(client, info):
     """
     消息处理
     """
-    global data_len, labels
+    global data_len, labels, param_dict, initiator_batch_idx, responder_batch_idx
     data = []
     client.sendall("Connection established successfully!".encode(encoding='utf-8'))
     while True:
@@ -62,6 +65,13 @@ def message_handle(client, info):
                 g_conn_pool[client_type] = client
                 print("current connect num: {}".format(len(g_conn_pool)))
                 print('on client connect: ' + client_type, info)
+            elif 'START' == cmd:
+                labels = []
+                data = []
+                if client_type.startswith('initiator'):
+                    initiator_batch_idx = jd['data']['data']
+                else:
+                    responder_batch_idx = jd['data']['data']
             elif 'SEND_DATA' == cmd:
                 # print('recv client msg: ' + client_type, jd['data'])
                 data.append(jd['data']['data'])
@@ -94,8 +104,8 @@ if __name__ == '__main__':
     # main thread
     while True:
         if len(param_dict) == 2:
+            print('initiator_batch_idx = {}, responder_batch_idx: {}'.format(initiator_batch_idx, responder_batch_idx))
             param_list = [0] * data_len
-            loss_list = []
             Softmax = torch.nn.Softmax(dim=1)
             loss = torch.nn.NLLLoss()
             for i in range(data_len):
@@ -103,11 +113,14 @@ if __name__ == '__main__':
                     param_list[i] += torch.tensor(param_dict.get(key)[i])
                 # print(Softmax(param_list[i]))
                 param_list[i] = Softmax(param_list[i])
-                loss_list.append(loss(param_list[i], torch.tensor(labels[i]).long()))
-            # print(loss_list[:])
-            # TODO: remove clients after loss calculating, init global parameters
+                criteria = loss(param_list[i], torch.tensor(labels[i]).long()).tolist()
+
             for cli in g_conn_pool:
-                print(g_conn_pool.get(cli))
+                client_socket = g_conn_pool.get(cli)
+                client_socket.sendall(str([criteria]).encode('utf-8'))
+            data_len = 0
+            param_dict.clear()
+
         time.sleep(0.1)
 
     

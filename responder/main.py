@@ -86,20 +86,24 @@ class MyDataset(Dataset):
 
 def train(model, epoch, optimizer, train_loader):
     global client
-    recv_param = None
-    optimizer.zero_grad()
-    for data, label in train_loader:
-        y_pred = model(data)
-        send_data(client, 'SEND_DATA', data=y_pred.tolist())
-        # buffer time
-        time.sleep(0.01)
-        send_data(client, 'SEND_LABELS', label=label.tolist())
-    send_data(client, 'END')
-    while recv_param is None:
-        time.sleep(0.1)
-        # loss = criteria(y_pred, label.long())
-        # loss.backward()
-        # optimizer.step()
+    idx = 0
+    while True:
+        for data, label in train_loader:
+            optimizer.zero_grad()
+            idx += 1
+            y_pred = model(data)
+            # send data to coordinator
+            send_data(client, 'START', data=idx)
+            send_data(client, 'SEND_DATA', data=y_pred.tolist())
+            # buffer time
+            time.sleep(0.01)
+            send_data(client, 'END')
+            send_data(client, 'SEND_LABELS', label=label.tolist())
+            param_recv = client.recv(1024).decode('utf-8')
+            loss = torch.tensor(eval(param_recv))
+            loss.requires_grad = True
+            loss.backward()
+            optimizer.step()
 
 
 def test(model, test_loader):
@@ -118,7 +122,7 @@ def send_data(client, cmd, **kv):
     jd = {}
     jd['COMMAND'] = cmd
     jd['client_type'] = client_type
-    if cmd == 'SEND_DATA':
+    if cmd == 'SEND_DATA' or cmd == 'START':
         jd['data'] = kv
     elif cmd == 'SEND_LABELS':
         jd['label'] = kv

@@ -91,19 +91,26 @@ class MyDataset(Dataset):
 
 def train(model, epoch, optimizer, train_loader):
     global client
-    recv_param = None
-    optimizer.zero_grad()
-    for data, label in train_loader:
-        y_pred = model(data)
-        # send data to coordinator
-        send_data(client, 'SEND_DATA', data=y_pred.tolist())
-        time.sleep(0.01)
-    send_data(client, 'END')
-    while recv_param is None:
-        time.sleep(0.1)
-        # loss = criteria(y_pred, label.long())
-        # loss.backward()
-        # optimizer.step()
+    idx = 0
+    while True:
+        for data, label in train_loader:
+            optimizer.zero_grad()
+            idx += 1
+            y_pred = model(data)
+
+            # send data to coordinator
+            send_data(client, 'START', data=idx)
+            send_data(client, 'SEND_DATA', data=y_pred.tolist())
+
+            # buffer time
+            time.sleep(0.01)
+            send_data(client, 'END')
+            param_recv = client.recv(1024).decode('utf-8')
+            loss = torch.tensor(eval(param_recv))
+            loss.requires_grad = True
+            # print(loss)
+            loss.backward()
+            optimizer.step()
 
 
 def test(model, epoch, test_loader, test_num):
@@ -123,7 +130,10 @@ def send_data(client, cmd, **kv):
     jd = {}
     jd['COMMAND'] = cmd
     jd['client_type'] = client_type
-    jd['data'] = kv
+    if cmd == 'SEND_DATA' or cmd == 'START':
+        jd['data'] = kv
+    elif cmd == 'SEND_LABELS':
+        jd['label'] = kv
 
     jsonstr = json.dumps(jd)
     # print('send: ' + jsonstr)
@@ -169,17 +179,3 @@ if __name__ == '__main__':
     for name, param in LR_model.named_parameters():
         if param.requires_grad:
             initiator_param = param.data
-
-    # # send params to coordinator
-    # client = socket.socket()
-    # client.connect(('127.0.0.1', 12345))
-    # print(client.recv(1024).decode(encoding='utf-8'))
-    # send_data(client, 'CONNECT')
-    #
-    #
-    #
-    # while True:
-    #     print('send parameters to coordinator')
-    #     b = input('start')
-    #     a = [1, 2, 3, 4, 5]
-    #     send_data(client, 'SEND_DATA', data=a)
