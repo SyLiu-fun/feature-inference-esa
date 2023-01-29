@@ -75,12 +75,15 @@ def message_handle(client, info):
             elif 'SEND_DATA' == cmd:
                 # print('recv client msg: ' + client_type, jd['data'])
                 data.append(jd['data']['data'])
-            elif 'END' == cmd:
+            elif 'BATCH_END' == cmd:
                 data_len = len(data)
                 param_dict[client_type] = data
                 # print(param_dict.get(client_type))
             elif 'SEND_LABELS' == cmd:
                 labels.append(jd['label']['label'])
+            elif 'ITER_END' == cmd:
+                remove_client(client_type)
+                break
         except Exception as e:
             print(e.with_traceback())
             remove_client(client_type)

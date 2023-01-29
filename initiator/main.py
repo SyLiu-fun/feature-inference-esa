@@ -104,13 +104,14 @@ def train(model, epoch, optimizer, train_loader):
 
             # buffer time
             time.sleep(0.01)
-            send_data(client, 'END')
+            send_data(client, 'BATCH_END')
             param_recv = client.recv(1024).decode('utf-8')
             loss = torch.tensor(eval(param_recv))
             loss.requires_grad = True
             # print(loss)
             loss.backward()
             optimizer.step()
+        send_data(client, 'ITER_END')
 
 
 def test(model, epoch, test_loader, test_num):

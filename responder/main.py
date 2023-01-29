@@ -97,13 +97,15 @@ def train(model, epoch, optimizer, train_loader):
             send_data(client, 'SEND_DATA', data=y_pred.tolist())
             # buffer time
             time.sleep(0.01)
-            send_data(client, 'END')
+            send_data(client, 'BATCH_END')
             send_data(client, 'SEND_LABELS', label=label.tolist())
             param_recv = client.recv(1024).decode('utf-8')
             loss = torch.tensor(eval(param_recv))
             loss.requires_grad = True
             loss.backward()
             optimizer.step()
+        send_data(client, 'ITER_END')
+
 
 
 def test(model, test_loader):
