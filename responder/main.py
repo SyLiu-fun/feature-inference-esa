@@ -88,35 +88,43 @@ def train(model, epoch, optimizer, train_loader):
     global client
     idx = 0
     while True:
-        for data, label in train_loader:
-            optimizer.zero_grad()
-            idx += 1
-            y_pred = model(data)
-            # send data to coordinator
-            send_data(client, 'START', data=idx)
-            send_data(client, 'SEND_DATA', data=y_pred.tolist())
-            # buffer time
-            time.sleep(0.01)
-            send_data(client, 'BATCH_END')
-            send_data(client, 'SEND_LABELS', label=label.tolist())
-            param_recv = client.recv(1024).decode('utf-8')
-            loss = torch.tensor(eval(param_recv))
-            loss.requires_grad = True
-            loss.backward()
-            optimizer.step()
-        send_data(client, 'ITER_END')
+        try:
+            for data, label in train_loader:
+                optimizer.zero_grad()
+                idx += 1
+                y_pred = model(data)
+                # send data to coordinator
+                send_data(client, 'START', data=idx)
+                send_data(client, 'SEND_DATA', data=y_pred.tolist())
+                # buffer time
+                time.sleep(0.01)
+                send_data(client, 'BATCH_END')
+                send_data(client, 'SEND_LABELS', label=label.tolist())
+                param_recv = client.recv(1024).decode('utf-8')
+                loss = torch.tensor(eval(param_recv))
+                loss.requires_grad = True
+                loss.backward()
+                optimizer.step()
+            send_data(client, 'ITER_END')
+        except ConnectionAbortedError:
+            print("iter-{} complete!".format(epoch))
+            break
 
 
 
-def test(model, test_loader):
+def test(model, epoch, test_loader, test_num):
     loss = 0
     correct = 0
+    # model.eval()
     with torch.no_grad():
         for data, label in test_loader:
             y_pred = model(data)
             loss += criteria(y_pred, label.long())
             res = y_pred.argmax(dim=1, keepdim=True)
             correct += res.eq(label.view_as(res)).sum().item()
+    print("***************")
+    print('step{}, accuracy: {}%'.format(epoch, correct * 100 / test_num))
+    print("***************")
 
 
 def send_data(client, cmd, **kv):
@@ -151,11 +159,11 @@ if __name__ == '__main__':
     train_loader = data.DataLoader(train_set, batch_size=64, shuffle=False)
     test_loader = data.DataLoader(test_set, batch_size=64, shuffle=False)
 
-    client = socket.socket()
     base_name = "responder"
 
     for i in range(1, pp.getparam('epochs') + 1):
         # connect to coordinator
+        client = socket.socket()
         client_type = base_name + "-it-" + str(i)
         print("responder is connecting to coordinator in iterator-{}".format(i))
         client.connect(('127.0.0.1', 12345))
@@ -163,6 +171,9 @@ if __name__ == '__main__':
         send_data(client, 'CONNECT')
 
         train(LR_model, i, optimizer, train_loader)
+        # test(LR_model, i, test_loader, dataset.test_samples_num)
+
+        scheduler.step()
 
     # client = socket.socket()
     # client.connect(('127.0.0.1', 12345))

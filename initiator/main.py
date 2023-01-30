@@ -12,7 +12,7 @@ from torch.utils.data import Dataset
 
 from model1 import LogisticRegressionModel
 
-
+# TODO: fix the bug that parameters of the model don't change in each training epoch
 class ParamsParser:
     parameters = {}
 
@@ -93,37 +93,45 @@ def train(model, epoch, optimizer, train_loader):
     global client
     idx = 0
     while True:
-        for data, label in train_loader:
-            optimizer.zero_grad()
-            idx += 1
-            y_pred = model(data)
+        try:
+            for data, label in train_loader:
+                optimizer.zero_grad()
+                idx += 1
+                y_pred = model(data)
 
-            # send data to coordinator
-            send_data(client, 'START', data=idx)
-            send_data(client, 'SEND_DATA', data=y_pred.tolist())
+                # send data to coordinator
+                send_data(client, 'START', data=idx)
+                send_data(client, 'SEND_DATA', data=y_pred.tolist())
 
-            # buffer time
-            time.sleep(0.01)
-            send_data(client, 'BATCH_END')
-            param_recv = client.recv(1024).decode('utf-8')
-            loss = torch.tensor(eval(param_recv))
-            loss.requires_grad = True
-            # print(loss)
-            loss.backward()
-            optimizer.step()
-        send_data(client, 'ITER_END')
+                # buffer time
+                time.sleep(0.01)
+                send_data(client, 'BATCH_END')
+                param_recv = client.recv(1024).decode('utf-8')
+                loss = torch.tensor(eval(param_recv))
+                loss.requires_grad = True
+                # print(loss)
+                loss.backward()
+                optimizer.step()
+            send_data(client, 'ITER_END')
+        except ConnectionAbortedError:
+            print("iter-{} complete!".format(epoch))
+            print(model.parameters())
+            break
 
 
 def test(model, epoch, test_loader, test_num):
     loss = 0
     correct = 0
+    # model.eval()
     with torch.no_grad():
         for data, label in test_loader:
             y_pred = model(data)
             loss += criteria(y_pred, label.long())
             res = y_pred.argmax(dim=1, keepdim=True)
             correct += res.eq(label.view_as(res)).sum().item()
-    print('step{}, accuracy: {}%'.format(epoch, correct / test_num))
+    print("***************")
+    print('step{}, accuracy: {}%'.format(epoch, correct / test_num * 100))
+    print("***************")
 
 
 def send_data(client, cmd, **kv):
@@ -146,7 +154,7 @@ if __name__ == '__main__':
     pp = ParamsParser()
     dataset = MyDataset(pp)
     LR_model = LogisticRegressionModel(dataset.feature_num, dataset.class_num)
-    optimizer = torch.optim.Adam(LR_model.parameters())
+    optimizer = torch.optim.Adam(LR_model.parameters(), lr=0.001)
     criteria = torch.nn.CrossEntropyLoss()
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
 
@@ -159,10 +167,10 @@ if __name__ == '__main__':
     train_loader = data.DataLoader(train_set, batch_size=64, shuffle=False)
     test_loader = data.DataLoader(test_set, batch_size=64, shuffle=False)
 
-    client = socket.socket()
     base_name = "initiator"
 
     for i in range(1, pp.getparam('epochs') + 1):
+        client = socket.socket()
         # connect to coordinator
         client_type = base_name + "-it-" + str(i)
         print("initiator is connecting to coordinator in iterator-{}".format(i))
@@ -171,12 +179,14 @@ if __name__ == '__main__':
         send_data(client, 'CONNECT')
 
         train(LR_model, i, optimizer, train_loader)
+        # test(LR_model, i, test_loader, dataset.test_samples_num)
+        for name, param in LR_model.named_parameters():
+            if param.requires_grad:
+                print(param.data)
 
-        # train(LR_model, i, optimizer, train_loader)
-        # # test(LR_model, i, test_loader, dataset.test_samples_num)
-        # scheduler.step()
+        scheduler.step()
 
-    initiator_param = None
-    for name, param in LR_model.named_parameters():
-        if param.requires_grad:
-            initiator_param = param.data
+    # initiator_param = None
+    # for name, param in LR_model.named_parameters():
+    #     if param.requires_grad:
+    #         initiator_param = param.data
