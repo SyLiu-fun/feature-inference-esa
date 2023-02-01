@@ -107,20 +107,20 @@ if __name__ == '__main__':
     # main thread
     while True:
         if len(param_dict) == 2:
-            print('initiator_batch_idx = {}, responder_batch_idx: {}'.format(initiator_batch_idx, responder_batch_idx))
             param_list = [0] * data_len
             Softmax = torch.nn.Softmax(dim=1)
-            loss = torch.nn.NLLLoss()
+            # loss = torch.nn.NLLLoss()
             for i in range(data_len):
                 for key in param_dict.keys():
                     param_list[i] += torch.tensor(param_dict.get(key)[i])
-                # print(Softmax(param_list[i]))
                 param_list[i] = Softmax(param_list[i])
-                criteria = loss(param_list[i], torch.tensor(labels[i]).long()).tolist()
+                # criteria = loss(param_list[i], torch.tensor(labels[i]).long())
+
+                print('initiator_batch_idx = {}, responder_batch_idx: {}'.format(initiator_batch_idx, responder_batch_idx))
 
             for cli in g_conn_pool:
                 client_socket = g_conn_pool.get(cli)
-                client_socket.sendall(str([criteria]).encode('utf-8'))
+                client_socket.sendall(str(param_list[0].tolist()).encode('utf-8'))
             data_len = 0
             param_dict.clear()
 

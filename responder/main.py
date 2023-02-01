@@ -93,6 +93,7 @@ def train(model, epoch, optimizer, train_loader):
                 optimizer.zero_grad()
                 idx += 1
                 y_pred = model(data)
+
                 # send data to coordinator
                 send_data(client, 'START', data=idx)
                 send_data(client, 'SEND_DATA', data=y_pred.tolist())
@@ -100,13 +101,15 @@ def train(model, epoch, optimizer, train_loader):
                 time.sleep(0.01)
                 send_data(client, 'BATCH_END')
                 send_data(client, 'SEND_LABELS', label=label.tolist())
-                param_recv = client.recv(1024).decode('utf-8')
-                loss = torch.tensor(eval(param_recv))
-                loss.requires_grad = True
+                param_recv = client.recv(4096).decode('utf-8')
+                pred = torch.tensor(eval(param_recv))
+                pred.requires_grad = True
+                loss = criteria(pred, label.long())
                 loss.backward()
                 optimizer.step()
             send_data(client, 'ITER_END')
         except ConnectionAbortedError:
+            client.close()
             print("iter-{} complete!".format(epoch))
             break
 
@@ -146,9 +149,9 @@ if __name__ == '__main__':
     pp = ParamsParser()
     dataset = MyDataset(pp)
     LR_model = LogisticRegressionModel(dataset.feature_num, dataset.class_num)
+    criteria = torch.nn.NLLLoss()
     optimizer = torch.optim.Adam(LR_model.parameters())
-    criteria = torch.nn.CrossEntropyLoss()
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
 
     train_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num))
     test_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num,

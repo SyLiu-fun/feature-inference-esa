@@ -12,6 +12,7 @@ from torch.utils.data import Dataset
 
 from model1 import LogisticRegressionModel
 
+
 # TODO: fix the bug that parameters of the model don't change in each training epoch
 class ParamsParser:
     parameters = {}
@@ -98,7 +99,6 @@ def train(model, epoch, optimizer, train_loader):
                 optimizer.zero_grad()
                 idx += 1
                 y_pred = model(data)
-
                 # send data to coordinator
                 send_data(client, 'START', data=idx)
                 send_data(client, 'SEND_DATA', data=y_pred.tolist())
@@ -106,16 +106,17 @@ def train(model, epoch, optimizer, train_loader):
                 # buffer time
                 time.sleep(0.01)
                 send_data(client, 'BATCH_END')
-                param_recv = client.recv(1024).decode('utf-8')
-                loss = torch.tensor(eval(param_recv))
-                loss.requires_grad = True
-                # print(loss)
+                param_recv = client.recv(4096).decode('utf-8')
+                pred = torch.tensor(eval(param_recv))
+                pred.requires_grad = True
+                loss = criteria(pred, label.long())
                 loss.backward()
                 optimizer.step()
+
             send_data(client, 'ITER_END')
         except ConnectionAbortedError:
+            client.close()
             print("iter-{} complete!".format(epoch))
-            print(model.parameters())
             break
 
 
@@ -132,6 +133,35 @@ def test(model, epoch, test_loader, test_num):
     print("***************")
     print('step{}, accuracy: {}%'.format(epoch, correct / test_num * 100))
     print("***************")
+
+
+def attack(ground_truth, input_sample, id):
+    # 返回一个符合均值为0，方差为1的正态分布（标准正态分布）中填充随机数的张量，例tensor([-1.9996,  1.1006, -1.8737, -1.6735, -1.8565,  0.9147,
+    # 1.1568, -0.4748, 0.1593,  0.0408])
+    noise = torch.randn(pp.getparam('target_features'))
+    # sigmoid激活
+    t = noise.sigmoid()
+    # parameters['num_target_features'] = 10，假设target的每条数据有10个feature，这10个feature在每个sample的最后10列
+    random_mse = ((t - input_sample[total_feature_num - pp.getparam('target_features'):]) ** 2).mean()
+    input_sample.resize_((total_feature_num, 1))
+    # 前10个数据是adv（攻击者）拥有的数据， 后10个是target所拥有的数据
+    input_sample_adv = input_sample[:total_feature_num - parameters['num_target_features'], :]
+    input_sample_target = input_sample[total_feature_num - parameters['num_target_features']:, :]
+
+    # 该模块下的tensor不会自动求导，对ground_truth求对数，即求ln(v)
+    with torch.no_grad():
+        ground_truth_ln = torch.log(ground_truth)
+    # left和right size均为1
+    ground_truth_ln_left = ground_truth_ln[:class_num - 1]
+    ground_truth_ln_right = ground_truth_ln[1:]
+    ground_truth_ln_diff = ground_truth_ln_left - ground_truth_ln_right
+    ground_truth_ln_diff.resize_(class_num - 1, 1)
+    a = torch.matmul(params_adv, input_sample_adv)
+    b = ground_truth_ln_diff - a
+    # 求出target的训练集
+    x_target = torch.matmul(params_target_inv, b)
+    attack_mse = ((x_target - input_sample_target) ** 2).mean()
+    return attack_mse, random_mse
 
 
 def send_data(client, cmd, **kv):
@@ -154,9 +184,9 @@ if __name__ == '__main__':
     pp = ParamsParser()
     dataset = MyDataset(pp)
     LR_model = LogisticRegressionModel(dataset.feature_num, dataset.class_num)
-    optimizer = torch.optim.Adam(LR_model.parameters(), lr=0.001)
-    criteria = torch.nn.CrossEntropyLoss()
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
+    optimizer = torch.optim.Adam(LR_model.parameters(), lr=0.01)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
+    criteria = torch.nn.NLLLoss()
 
     train_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num))
     test_set = torch.utils.data.Subset(dataset, range(dataset.train_samples_num,
@@ -179,14 +209,55 @@ if __name__ == '__main__':
         send_data(client, 'CONNECT')
 
         train(LR_model, i, optimizer, train_loader)
-        # test(LR_model, i, test_loader, dataset.test_samples_num)
-        for name, param in LR_model.named_parameters():
-            if param.requires_grad:
-                print(param.data)
+        #test(LR_model, i, test_loader, dataset.test_samples_num)
+
+        print(optimizer.param_groups)
 
         scheduler.step()
 
-    # initiator_param = None
-    # for name, param in LR_model.named_parameters():
-    #     if param.requires_grad:
-    #         initiator_param = param.data
+    linear_layer_params = None
+    for name, param in LR_model.named_parameters():
+        if param.requires_grad:
+            linear_layer_params = param.data
+
+    # compute the required coefficients for attack
+    # linear_layer_params 是 2 * 20的tensor
+    linear_layer_params_left = linear_layer_params[:1, :]
+    # print('params left: ', linear_layer_params_left)
+    linear_layer_params_right = linear_layer_params[1:, :]
+    # print('params right: ', linear_layer_params_right)
+    # 计算相邻参数的差值，即（θk - θk+1）
+    linear_layer_params_sub = linear_layer_params_left - linear_layer_params_right
+    # print('params sub: ', linear_layer_params_sub)
+
+    # target 拥有的参数为后10列，adv拥有的参数为前10列
+    params_target = linear_layer_params_sub[:, total_feature_num - parameters['num_target_features']:]
+    params_adv = linear_layer_params_sub[:, :total_feature_num - parameters['num_target_features']]
+    # print('params target shape: ', params_target.shape)
+    # print('params adversary shape: ', params_adv.shape)
+
+    # Computes the pseudoinverse (Moore-Penrose inverse) of the params_target matrix
+    # 计算target参数矩阵的逆元
+    params_target_inv = torch.pinverse(params_target)
+
+    total_attack_mse = 0.0
+    total_rand_mse = 0.0
+    pred_interval = 1000
+    # 取predict数据集中的每一条数据（数据，标签）
+    for i in range(dataset.pred_samples_num):
+        sample, label = pred_set.__getitem__(i)
+        # 用model计算ground_truth, 即softmax后的预测概率
+        y_ground_truth = LR_model(sample)
+
+        # 使用attack攻击模型计算mse
+        back_attack_mse, rand_mse = attack(y_ground_truth, sample, i)
+        total_attack_mse += back_attack_mse
+        total_rand_mse += rand_mse
+
+    cur_average_attack_mse = total_attack_mse / pred_set_num
+    cur_average_rand_mse = total_rand_mse / pred_set_num
+    logging.critical('average attack mse: %f', cur_average_attack_mse)
+    logging.critical('average random mse: %f', cur_average_rand_mse)
+    back_prop_mse.update(cur_average_attack_mse)
+    random_guess_mse.update(cur_average_rand_mse)
+
